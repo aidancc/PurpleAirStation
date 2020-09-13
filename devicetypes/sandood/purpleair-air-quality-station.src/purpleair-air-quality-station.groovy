@@ -1,49 +1,50 @@
 /**
-*  Copyright 2015 SmartThings
-*
-*  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
-*  in compliance with the License. You may obtain a copy of the License at:
-*
-*      http://www.apache.org/licenses/LICENSE-2.0
-*
-*  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
-*  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
-*  for the specific language governing permissions and limitations under the License.
-*
-*  PurpleAir Air Quality Station
-*
-*  Author: SmartThings
-*
-*  Date: 2018-07-04
-*
-*	Updates by Barry A. Burke (storageanarchy@gmail.com)
-*	Date: 2017 - 2018
-*
-*	1.0.00 - Initial Release
-*	1.0.01 - Cleanup of descriptionTexts & bug fixes
-*	1.0.02 - Fixed typos
-*	1.0.03 - More string edits
-*	1.0.04 - Updated icons & color handling
-*	1.0.05 - Now use BigDecimal for maximum precision
-*	1.0.06 - Finalized conversion to BigDecimal
-*	1.0.07 - Better error handling
-*	1.0.08 - Changed all numeric attributes to "number"
-*	1.0.09 - Changed to maintain and display only integer AQI (decimals are distracting)
-*	1.0.10 - Fixed room/thing tile display
-*	1.0.11 - Handles Inside PurpleAir Sensor (only 1 sensor by design)
-*	1.0.12 - Internal cleanup of Inside sensor support, added runEvery3Minutes
-*	1.0.13 - Code annotations for hubitat users
-*	1.0.14 - Added CAQI calculation for new "Air Quality Sensor" - see https://en.wikipedia.org/wiki/Air_quality_index#CAQI
-*	1.1.01 - Added automatic support for both SmartThings and Hubitat
-*	1.1.02a- Fix null response handling
-*	1.1.03 - Fixed descriptionText:
-*   1.1.04 - Fixed incorrect collection of temperature, humidity and pressure where both sensors are not available
-*	1.1.05 - Added optional debug logging preference setting
-*	1.1.06 - Optimized temp/humidity/pressure updates
-*	1.1.07 - Fixed Flagged sensors, added Hidden device support (needs owners's Key)
-*	1.1.08 - Added reference adjustments for Temp, Humidity & Pressure
-*
-*/
+ *  Copyright 2014 SmartThings
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+ *  in compliance with the License. You may obtain a copy of the License at:
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+ *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
+ *  for the specific language governing permissions and limitations under the License.
+ *
+ */
+
+
+
+// Parse incoming device messages to generate events
+def parse(String description) {
+    def pair = description.split(":")
+    createEvent(name: pair[0].trim(), value: pair[1].trim(), unit:"F")
+}
+
+def installed() {
+    initialize()
+}
+
+def updated() {
+    initialize()
+}
+
+def initialize() {
+    sendEvent(name: "DeviceWatch-DeviceStatus", value: "online")
+    sendEvent(name: "healthStatus", value: "online")
+    sendEvent(name: "DeviceWatch-Enroll", value: [protocol: "cloud", scheme:"untracked"].encodeAsJson(), displayed: false)
+    if (!device.currentState("temperature")) {
+        setTemperature(getTemperature())
+    }
+}
+
+private getTemperature() {
+    def ts = device.currentState("temperature")
+    Integer value = ts ? ts.integerValue : 72
+    return value
+}
+
+
+
 import groovy.json.JsonSlurper
 import java.math.BigDecimal
 
@@ -83,16 +84,13 @@ private Boolean getIsHEHub() { (state.isHE) }					// if (isHEHub) ...
 // **************************************************************************************************************************
 
 metadata {
-    definition (name: "PurpleAir Air Quality Station", namespace: "sandood", author: "sandood",
-			    importUrl: "https://raw.githubusercontent.com/SANdood/PurpleAirStation/master/devicetypes/sandood/purpleair-air-quality-station.src/purpleair-air-quality-station.groovy") {
+    definition (name: "Simulated Temperature Sensor", namespace: "smartthings/testing", author: "SmartThings") {
         capability "Temperature Measurement"
-        capability "Relative Humidity Measurement"
-        capability "Signal Strength"
+        capability "Switch Level"
         capability "Sensor"
-        capability "Refresh"
-        if (isST) {capability "Air Quality Sensor"} else {attribute "airQuality", "number"}
+        capability "Health Check"
 
-        attribute "locationName", "string"
+	    attribute "locationName", "string"
         attribute "ID", "string"
         attribute "pressure", "number"
 		attribute "airQuality", 'number'
@@ -120,7 +118,22 @@ metadata {
 		attribute "pressure", 'number'
 		attribute "pressureDisplay", 'string'
         command "refresh"
+      
     }
+
+    // UI tile definitions
+    tiles {
+        valueTile("temperature", "device.aqi10", width: 2, height: 2) {
+            state("temperature", label:'${currentValue}', unit:"F",
+                backgroundColors: (aqiColors)
+            )
+        }
+
+        main "temperature"
+        details("temperature")
+    }
+	
+	
 
     preferences {
 		input(name: "purpleID", type: "text", title: (isHE?'<b>':'') + "PurpleAir Station ID" + (isHE?'</b>':''), required: true, displayDuringSetup: true, description: 'Enter the desired PurpleAir Station ID')
@@ -133,119 +146,7 @@ metadata {
 		input(name: 'debugOn', type: 'bool', title: (isHE?'<b>':'') + "Enable debug logging?" + (isHE?'</b>':''), displayDuringSetup: true, defaultValue: false)
     }
     
-    tiles(scale: 2) {
-        multiAttributeTile(name:"airQualityIndex", type:"generic", width:6, height:4, canChangeIcon: false) {
-            tileAttribute("device.airQualityIndex", key: "PRIMARY_CONTROL") {
-                attributeState("airQualityIndex", label:'${currentValue}', defaultState: true, 
-					backgroundColors: (aqiColors)
-				)
-			}
-            tileAttribute("device.message", key: "SECONDARY_CONTROL" ) {
-				attributeState('default', label: '${currentValue}', defaultState: true, icon: "https://raw.githubusercontent.com/SANdood/PurpleAirStation/master/images/purpleair.png")
-			}
-        }
-        valueTile('caqi', 'device.CAQI', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: 'CAQI\n${currentValue}', unit: "CAQI", 
-            	backgroundColors: (caqiColors)
-        }
-		valueTile('aqi', 'device.aqi', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: 'AQI\n${currentValue}', icon: "https://raw.githubusercontent.com/SANdood/PurpleAirStation/master/images/purpleair-small.png",
-            	backgroundColors: (aqiColors)
-        }
-        valueTile('aqiDisplay', 'device.aqiDisplay', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: '${currentValue}', icon: "https://raw.githubusercontent.com/SANdood/PurpleAirStation/master/images/purpleair-small.png"
-        }
-		valueTile('aqi10', 'device.aqi10', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: 'AQI\n${currentValue}',
-            	backgroundColors: (aqiColors)
-        }
-		valueTile('aqi30', 'device.aqi30', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: 'AQI\n${currentValue}',
-            	backgroundColors: (aqiColors)
-        }
-		valueTile('aqi1', 'device.aqi1', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: 'AQI\n${currentValue}',
-            	backgroundColors: (aqiColors)
-        }
-		valueTile('aqi6', 'device.aqi6', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: 'AQI\n${currentValue}',
-            	backgroundColors: (aqiColors)
-        }
-		valueTile('aqi24', 'device.aqi24', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: 'AQI\n${currentValue}',
-            	backgroundColors: (aqiColors)
-        }
-		valueTile('aqi7', 'device.aqi7', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: 'AQI\n${currentValue}',
-            	backgroundColors: (aqiColors)
-        }
-		valueTile('pm', 'device.pm', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: 'Now\n${currentValue}\nµg/m³'
-        }
-		valueTile('pm10', 'device.pm10', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: '10 Min\n${currentValue}\nµg/m³'
-        }
-		valueTile('pm30', 'device.pm30', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: '30 Min\n${currentValue}\nµg/m³'
-        }
-		valueTile('pm1', 'device.pm1', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: '1 Hour\n${currentValue}\nµg/m³'
-        }
-		valueTile('pm6', 'device.pm6', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: '6 Hour\n${currentValue}\nµg/m³'
-        }
-		valueTile('pm24', 'device.pm24', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: '1 Day\n${currentValue}\nµg/m³'
-        }
-		valueTile('pm7', 'device.pm7', inactiveLabel: false, width: 1, height: 1, decoration: 'flat', wordWrap: true) {
-        	state 'default', label: '1 Week\n${currentValue}\nµg/m³'
-        }
-        valueTile("locationTile", "device.locationName", inactiveLabel: false, width: 3, height: 1, decoration: "flat", wordWrap: true) {
-            state "default", label:'${currentValue}'
-        }
-        standardTile("refresh", "device.weather", inactiveLabel: false, width: 1, height: 1, decoration: "flat", wordWrap: true) {
-            state "default", label: "", action: "refresh", icon:"st.secondary.refresh"
-        }
-        valueTile("pressure", "device.pressureDisplay", inactiveLabel: false, width: 1, height: 1, decoration: "flat", wordWrap: true) {
-            state "default", label: '${currentValue}'
-        }
-        valueTile("rssi", "device.rssi", inactiveLabel: false, width: 1, height: 1, decoration: "flat", wordWrap: true) {
-            state "default", label: 'RSSI\n${currentValue}db'
-        }
-        valueTile("ID", "device.ID", inactiveLabel: false, width: 1, height: 1, decoration: "flat", wordWrap: true) {
-            state "default", label: 'ID\n${currentValue}'
-        }
-		valueTile("updated", "device.updated", inactiveLabel: false, width: 3, height: 1, decoration: "flat", wordWrap: true) {
-            state "default", label: 'Updated\nat ${currentValue}'
-		}
-        valueTile("temperature", "device.temperatureDisplay", width: 1, height: 1, canChangeIcon: true) {
-            state "default", label: '${currentValue}°',
-				backgroundColors:[
-		            [value: 31, color: "#153591"],
-		            [value: 44, color: "#1e9cbb"],
-		            [value: 59, color: "#90d2a7"],
-		            [value: 74, color: "#44b621"],
-		            [value: 84, color: "#f1d801"],
-		            [value: 95, color: "#d04e00"],
-		            [value: 96, color: "#bc2323"]
-            	]
-        }
-        valueTile("humidity", "device.humidity", decoration: "flat", width: 1, height: 1) {
-			state("default", label: '${currentValue}%', unit: "%", defaultState: true, backgroundColors: [ //#d28de0")
-          		[value: 10, color: "#00BFFF"],
-                [value: 100, color: "#ff66ff"]
-            ] )
-		}
-       //main(["aqiDisplay"])
-        main(['airQualityIndex'])
-        details([	"airQualityIndex",
-					'aqi10', 'aqi30', 'aqi1', 'aqi6', 'aqi24', 'aqi7',
-					'pm10', 'pm30', 'pm1', 'pm6', 'pm24', 'pm7',
-					'updated', 'locationTile', 
-					'temperature', 'humidity', 'pressure', 'rssi', 'ID', 'caqi', 
-                    'refresh',
-				])
-	}
+    
 }
 
 def noOp() {}
